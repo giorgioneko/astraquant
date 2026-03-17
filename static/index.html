@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AstraQuant - AI Auto-Investment Bot</title>
+    <!-- Google Fonts for modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-background">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="container">
+        <header class="glass-header">
+            <div class="logo">
+                <div class="logo-icon">▲</div>
+                <h1>AstraQuant</h1>
+            </div>
+            
+            <nav class="nav-tabs">
+                <button class="nav-btn active" data-view="dashboard-view">Dashboard</button>
+                <button class="nav-btn" data-view="settings-view">Settings</button>
+            </nav>
+
+            <div class="header-actions">
+                <div class="status-badge stopped" id="bot-status" style="margin-right: 15px;">
+                    <span class="pulse-dot"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
+                <button id="toggle-bot-btn" class="btn btn-primary">Start Bot</button>
+            </div>
+        </header>
+
+        <main class="dashboard-grid view-section active-view" id="dashboard-view">
+            <!-- Portfolio Overview Card -->
+            <section class="card glass-card portfolio-card">
+                <div class="card-header">
+                    <h2>Portfolio Value</h2>
+                </div>
+                <div class="card-body">
+                    <h3 class="balance-display" id="total-balance">$0.00</h3>
+                </div>
+            </section>
+
+            <!-- Watched Assets Card -->
+            <section class="card glass-card watched-assets-card">
+                <div class="card-header">
+                    <h2>Watched Assets</h2>
+                </div>
+                <div class="card-body">
+                    <div id="watched-assets-grid" class="watched-assets-grid">
+                        <!-- Filled dynamically by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Active Positions Card -->
+            <section class="card glass-card positions-card">
+                <div class="card-header">
+                    <h2>Active Positions</h2>
+                </div>
+                <div class="card-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Asset</th>
+                                <th>Quantity</th>
+                                <th>Avg Entry</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-tbody">
+                            <tr><td colspan="3" class="loading-cell">Loading positions...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Trade Logs Card -->
+            <section class="card glass-card logs-card">
+                <div class="card-header">
+                    <h2>Recent Actions</h2>
+                </div>
+                <div class="card-body scrollable">
+                    <ul class="log-list" id="logs-list">
+                        <li class="log-item empty-state">Waiting for data...</li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <!-- SETTINGS PAGE -->
+        <main class="dashboard-grid view-section" id="settings-view" style="display: none;">
+            <!-- Configuration & AI Settings Card -->
+            <section class="card glass-card settings-card">
+                <div class="card-header">
+                    <h2>AI Engine & Watchlist</h2>
+                </div>
+                <div class="card-body settings-body">
+                    <div class="settings-group">
+                        <h3>Watchlist</h3>
+                        <div class="watchlist-controls">
+                            <input type="text" id="new-ticker" placeholder="e.g. TSLA, NVDA" class="input-field">
+                            <button id="add-ticker-btn" class="btn btn-secondary">Add</button>
+                        </div>
+                        <ul id="watchlist-list" class="watchlist-list">
+                           <!-- Dynamic items filled by JS -->
+                        </ul>
+                    </div>
+
+                    <div class="settings-group">
+                        <h3>LLM Provider</h3>
+                        <select id="llm-provider" class="input-field">
+                            <option value="finbert">Local FinBERT (Default NLP)</option>
+                            <option value="openai">Universal OpenAI Compatible API</option>
+                        </select>
+                        
+                        <div id="universal-llm-settings" style="display:none; margin-top: 1rem;">
+                            <label>Base URL <small>(e.g. https://api.openai.com/v1)</small></label>
+                            <input type="text" id="llm-base-url" class="input-field">
+                            
+                            <label>Model Name <small>(e.g. gpt-4o, deepseek-chat)</small></label>
+                            <input type="text" id="llm-model" class="input-field">
+                            
+                            <label>API Key <small>(Leave blank for local servers like Ollama)</small></label>
+                            <input type="password" id="llm-api-key" class="input-field" placeholder="sk-...">
+                        </div>
+                        
+                        <button id="save-settings-btn" class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Save Config</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
