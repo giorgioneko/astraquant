@@ -128,6 +128,95 @@ async function updateWatchedAssets() {
     }
 }
 
+// Track chart instances to destroy before re-rendering
+const _trendingCharts = {};
+
+// Fetch and render trending markets with sparkline charts
+async function updateTrending() {
+    const container = document.getElementById('trending-scroll');
+    if (!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/trending`);
+        const assets = await res.json();
+        
+        if (!assets || assets.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-muted);">No trending data available.</p>';
+            return;
+        }
+        
+        // Destroy existing charts to prevent memory leaks
+        Object.values(_trendingCharts).forEach(chart => chart.destroy());
+        Object.keys(_trendingCharts).forEach(k => delete _trendingCharts[k]);
+        
+        container.innerHTML = '';
+        
+        assets.forEach(asset => {
+            if (!asset.prices || asset.prices.length === 0) return;
+            
+            const changePct = asset.change_pct;
+            const changeClass = changePct > 0 ? 'positive' : changePct < 0 ? 'negative' : 'neutral';
+            const changeText = changePct !== null
+                ? `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`
+                : '–';
+            const priceText = asset.price !== null
+                ? `$${asset.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : 'N/A';
+
+            const chartColor = changePct >= 0 ? '#2ea043' : '#f85149';
+            const chartFill = changePct >= 0 ? 'rgba(46,160,67,0.15)' : 'rgba(248,81,73,0.12)';
+            const canvasId = `chart-${asset.ticker.replace('-', '_')}`;
+
+            const item = document.createElement('div');
+            item.className = 'trending-item';
+            item.innerHTML = `
+                <div class="trending-item-header">
+                    <span class="trending-ticker">${asset.ticker}</span>
+                    <span class="trending-change ${changeClass}">${changeText}</span>
+                </div>
+                <span class="trending-price">${priceText}</span>
+                <div class="trending-chart-wrap">
+                    <canvas id="${canvasId}"></canvas>
+                </div>
+            `;
+            container.appendChild(item);
+
+            // Draw sparkline chart
+            const ctx = document.getElementById(canvasId)?.getContext('2d');
+            if (ctx) {
+                _trendingCharts[asset.ticker] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: asset.timestamps,
+                        datasets: [{
+                            data: asset.prices,
+                            borderColor: chartColor,
+                            backgroundColor: chartFill,
+                            borderWidth: 1.5,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        scales: {
+                            x: { display: false },
+                            y: { display: false }
+                        },
+                        animation: false,
+                    }
+                });
+            }
+        });
+    } catch (error) {
+        console.error("Failed to fetch trending data", error);
+        container.innerHTML = '<p style="color: var(--text-muted);">Market data unavailable.</p>';
+    }
+}
+
 // Fetch and update trade logs
 async function updateLogs() {
     try {
@@ -294,6 +383,7 @@ async function init() {
     await updateWatchedAssets();
     await loadSettings();
     await loadWatchlist();
+    updateTrending(); // fire async, don't await — it takes a few seconds due to yfinance calls
     
     // Poll dashboard data every 5 seconds
     setInterval(() => {
@@ -306,6 +396,11 @@ async function init() {
     setInterval(() => {
         updateWatchedAssets();
     }, 30000);
+
+    // Trending charts refresh every 60 seconds
+    setInterval(() => {
+        updateTrending();
+    }, 60000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
