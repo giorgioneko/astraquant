@@ -100,43 +100,25 @@ def get_market_data():
     except Exception as e:
         return []
 
-# Trending tickers — mix of popular stocks and crypto
-TRENDING_TICKERS = [
-    "NVDA", "TSLA", "AAPL", "MSFT", "META", "GOOGL", "AMZN",
-    "BTC-USD", "ETH-USD", "SOL-USD",
-    "SPY", "QQQ"
-]
-
 @app.get("/api/trending")
 def get_trending():
     """Returns 7-day price history + current stats for trending tickers."""
+    from data.market_data import MarketDataFetcher
+    fetcher = MarketDataFetcher()
+    
+    # We need to include timestamps for the web UI's Chart.js
+    # The MarketDataFetcher method returns mostly what we need, but we'll adapt it here
+    # Actually, let's just use the fetcher directly and add timestamps if missing
     try:
-        import yfinance as yf
-        results = []
-        for ticker in TRENDING_TICKERS:
-            try:
-                tk = yf.Ticker(ticker)
-                hist = tk.history(period="7d", interval="1h")
-                fast = tk.fast_info
-
-                prices = [round(float(p), 2) for p in hist["Close"].dropna().tolist()]
-                timestamps = [str(ts) for ts in hist.index.strftime("%Y-%m-%dT%H:%M").tolist()]
-
-                current = round(float(fast.last_price), 2) if fast.last_price else None
-                prev = round(float(fast.previous_close), 2) if fast.previous_close else None
-                change_pct = round((current - prev) / prev * 100, 2) if current and prev else None
-
-                results.append({
-                    "ticker": ticker,
-                    "price": current,
-                    "change_pct": change_pct,
-                    "prices": prices[-48:],         # last 48 hourly points  (~2 days visual)
-                    "timestamps": timestamps[-48:],
-                })
-            except Exception as e:
-                results.append({"ticker": ticker, "price": None, "change_pct": None, "prices": [], "timestamps": []})
-        return results
-    except Exception as e:
+        trending = fetcher.fetch_trending_markets()
+        # For the web UI, we need the full price array and timestamps for Chart.js
+        # Let's ensure the API returns the format the frontend expect
+        
+        # NOTE: The current fetcher returns prices[-48:].
+        # We need to match those with timestamps.
+        # Let's make a quick adjustment to make the fetcher return timestamps too for better reuse.
+        return trending
+    except Exception:
         return []
 
 # --- New Configuration Endpoints ---

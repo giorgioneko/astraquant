@@ -1,4 +1,6 @@
 import time
+import sys
+import os
 from data.market_data import MarketDataFetcher
 from data.news_scraper import NewsFetcher
 from data.database import DatabaseManager
@@ -8,6 +10,14 @@ from trading.broker_client import BrokerClient
 from trading.risk_manager import RiskManager
 
 def main():
+    # Ensure terminal can print UTF-8 (sparklines/symbols) on Windows
+    if sys.platform == "win32":
+        try:
+            import codecs
+            sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+        except Exception:
+            pass
+
     print("Starting AI Trading Bot...")
     
     # Initialize components
@@ -51,6 +61,21 @@ def main():
                 model=model_name if model_name else "gpt-4o"
             )
             
+            # --- SHOW TRENDING MARKETS IN TERMINAL ---
+            print("\n" + "="*50)
+            print("TRENDING MARKETS SUMMARY")
+            print("-" * 50)
+            try:
+                trending_data = market_fetcher.fetch_trending_markets()
+                for t in trending_data[:6]: # Show top 6
+                    color = "\033[92m" if (t['change_pct'] or 0) >= 0 else "\033[91m"
+                    reset = "\033[0m"
+                    change_str = f"{t['change_pct']:+.2f}%" if t['change_pct'] is not None else "N/A"
+                    print(f"{t['ticker']:<8} | ${t['price']:>10.2f} | {color}{change_str:>8}{reset} | {t['sparkline']}")
+            except Exception as e:
+                print(f"Failed to fetch trending: {e}")
+            print("="*50)
+
             print(f"\n--- New Cycle - Balance: ${broker.get_account_balance():.2f} ---")
             
             if not tickers_to_watch:
