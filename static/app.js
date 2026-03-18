@@ -276,15 +276,32 @@ const settingsDom = {
     baseUrl: document.getElementById('llm-base-url'),
     model: document.getElementById('llm-model'),
     apiKey: document.getElementById('llm-api-key'),
-    saveBtn: document.getElementById('save-settings-btn'),
+    brokerType: document.getElementById('broker-type'),
+    brokerApiSettings: document.getElementById('broker-api-settings'),
+    brokerBaseUrl: document.getElementById('broker-base-url'),
+    brokerApiKey: document.getElementById('broker-api-key'),
+    brokerSecretKey: document.getElementById('broker-secret-key'),
     newTicker: document.getElementById('new-ticker'),
     addTickerBtn: document.getElementById('add-ticker-btn'),
     watchlist: document.getElementById('watchlist-list')
 };
 
-// Toggle universal settings visibility
+const mcpDom = {
+    list: document.getElementById('mcp-server-list'),
+    name: document.getElementById('mcp-name'),
+    cmd: document.getElementById('mcp-cmd'),
+    args: document.getElementById('mcp-args'),
+    env: document.getElementById('mcp-env'),
+    addBtn: document.getElementById('add-mcp-btn')
+};
+
 settingsDom.provider.addEventListener('change', (e) => {
     settingsDom.universalSettings.style.display = e.target.value === 'openai' ? 'block' : 'none';
+});
+
+// Toggle broker settings visibility
+settingsDom.brokerType.addEventListener('change', (e) => {
+    settingsDom.brokerApiSettings.style.display = e.target.value !== 'mock' ? 'block' : 'none';
 });
 
 async function loadSettings() {
@@ -297,7 +314,21 @@ async function loadSettings() {
         settingsDom.model.value = data.llm_model || 'gpt-4o';
         settingsDom.apiKey.value = data.llm_api_key || '';
         
+        // Map legacy broker types to the new generic 'external' type
+        let loadedBrokerType = data.broker_type || 'mock';
+        if (loadedBrokerType === 'alpaca' || loadedBrokerType === 'binance') {
+            loadedBrokerType = 'external';
+        }
+        settingsDom.brokerType.value = loadedBrokerType;
+        
+        settingsDom.brokerBaseUrl.value = data.broker_base_url || 'https://paper-api.alpaca.markets';
+        settingsDom.brokerApiKey.value = data.broker_api_key || '';
+        settingsDom.brokerSecretKey.value = data.broker_secret_key || '';
+        
         settingsDom.universalSettings.style.display = settingsDom.provider.value === 'openai' ? 'block' : 'none';
+        settingsDom.brokerApiSettings.style.display = settingsDom.brokerType.value !== 'mock' ? 'block' : 'none';
+        
+        syncCustomSelects();
         
     } catch (error) {
         console.error("Failed to load settings", error);
@@ -350,10 +381,81 @@ window.removeTicker = async (ticker) => {
     }
 };
 
-settingsDom.saveBtn.addEventListener('click', async () => {
-    const originalText = settingsDom.saveBtn.textContent;
-    settingsDom.saveBtn.textContent = 'Saving...';
+async function loadMCPServers() {
+    try {
+        const res = await fetch(`${API_BASE}/mcp-servers`);
+        const servers = await res.json();
+        
+        mcpDom.list.innerHTML = '';
+        if (servers.length === 0) {
+            mcpDom.list.innerHTML = '<div style="color:var(--text-muted); font-size:0.875rem;">No MCP servers configured yet.</div>';
+            return;
+        }
+        
+        servers.forEach(s => {
+            const div = document.createElement('div');
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.padding = '0.75rem';
+            div.style.background = 'rgba(255,255,255,0.05)';
+            div.style.borderRadius = '8px';
+            div.style.marginBottom = '0.5rem';
+            
+            div.innerHTML = `
+                <div>
+                    <strong style="color: var(--primary);">${s.name}</strong>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${s.command} ${s.args}</div>
+                </div>
+                <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: var(--danger)" onclick="deleteMCPServer(${s.id})">Del</button>
+            `;
+            mcpDom.list.appendChild(div);
+        });
+    } catch (e) {
+        console.error("Failed to load MCP servers", e);
+    }
+}
+
+window.deleteMCPServer = async (id) => {
+    try {
+        await fetch(`${API_BASE}/mcp-servers/${id}`, { method: 'DELETE' });
+        await loadMCPServers();
+    } catch (e) {
+        console.error("Failed to delete MCP server", e);
+    }
+};
+
+mcpDom.addBtn.addEventListener('click', async () => {
+    const name = mcpDom.name.value;
+    const cmd = mcpDom.cmd.value;
+    const args = mcpDom.args.value;
+    const env = mcpDom.env.value;
     
+    if(!name || !cmd) return alert("Name and Execution Command are required");
+    if(env) {
+        try { JSON.parse(env); } catch(e) { return alert("Environment variables must be valid JSON"); }
+    }
+    
+    mcpDom.addBtn.textContent = "Adding...";
+    try {
+        await fetch(`${API_BASE}/mcp-servers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, command: cmd, args, env_vars: env })
+        });
+        mcpDom.name.value = '';
+        mcpDom.cmd.value = '';
+        mcpDom.args.value = '';
+        mcpDom.env.value = '';
+        await loadMCPServers();
+    } catch (e) {
+        console.error("Failed to add MCP server", e);
+    }
+    mcpDom.addBtn.textContent = "Add Connection";
+});
+
+let settingsTimeout;
+async function autoSaveSettings() {
     try {
         await fetch(`${API_BASE}/settings`, {
             method: 'POST',
@@ -362,27 +464,122 @@ settingsDom.saveBtn.addEventListener('click', async () => {
                 llm_provider: settingsDom.provider.value,
                 llm_base_url: settingsDom.baseUrl.value,
                 llm_model: settingsDom.model.value,
-                llm_api_key: settingsDom.apiKey.value
+                llm_api_key: settingsDom.apiKey.value,
+                broker_type: settingsDom.brokerType.value,
+                broker_base_url: settingsDom.brokerBaseUrl.value,
+                broker_api_key: settingsDom.brokerApiKey.value,
+                broker_secret_key: settingsDom.brokerSecretKey.value
             })
         });
-        
-        settingsDom.saveBtn.textContent = 'Saved!';
-        setTimeout(() => settingsDom.saveBtn.textContent = originalText, 2000);
+        console.log("Settings auto-saved!");
     } catch (e) {
-        console.error("Failed to save settings", e);
-        settingsDom.saveBtn.textContent = 'Error!';
-        setTimeout(() => settingsDom.saveBtn.textContent = originalText, 2000);
+        console.error("Failed to auto-save settings", e);
+    }
+}
+
+// Attach auto-save to inputs in the settings tab
+document.querySelectorAll('#settings-view .input-field').forEach(input => {
+    // Only auto-save on input for those that aren't the add ticker field
+    if (input.id !== 'new-ticker') {
+        input.addEventListener('input', () => {
+            clearTimeout(settingsTimeout);
+            settingsTimeout = setTimeout(autoSaveSettings, 800);
+        });
+        input.addEventListener('change', autoSaveSettings);
     }
 });
 
+function setupCustomSelects() {
+    document.querySelectorAll('select.input-field').forEach(select => {
+        if(select.nextElementSibling && select.nextElementSibling.classList.contains('custom-select-wrapper')) return;
+        
+        select.style.display = 'none';
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'custom-select-wrapper';
+        
+        const display = document.createElement('div');
+        display.className = 'custom-select-display';
+        const selectedOption = select.options[select.selectedIndex];
+        display.innerHTML = `<span>${selectedOption ? selectedOption.text : ''}</span> <span style="font-size:0.7em; opacity:0.7">▼</span>`;
+        
+        const optionsList = document.createElement('div');
+        optionsList.className = 'custom-select-options';
+        
+        Array.from(select.options).forEach((option, index) => {
+            const optDiv = document.createElement('div');
+            optDiv.className = 'custom-option' + (option.selected ? ' selected' : '');
+            optDiv.textContent = option.text;
+            
+            optDiv.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(select.selectedIndex !== index) {
+                    select.selectedIndex = index;
+                    display.innerHTML = `<span>${option.text}</span> <span style="font-size:0.7em; opacity:0.7">▼</span>`;
+                    
+                    optionsList.querySelectorAll('.custom-option').forEach(o => o.classList.remove('selected'));
+                    optDiv.classList.add('selected');
+                    select.dispatchEvent(new Event('change'));
+                }
+                wrapper.classList.remove('open');
+                display.classList.remove('open');
+            });
+            optionsList.appendChild(optDiv);
+        });
+        
+        wrapper.appendChild(display);
+        wrapper.appendChild(optionsList);
+        select.parentNode.insertBefore(wrapper, select.nextSibling);
+        
+        display.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.custom-select-wrapper').forEach(w => {
+                if(w !== wrapper) {
+                    w.classList.remove('open');
+                    w.querySelector('.custom-select-display').classList.remove('open');
+                }
+            });
+            wrapper.classList.toggle('open');
+            display.classList.toggle('open');
+        });
+    });
+    
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.custom-select-wrapper').forEach(w => {
+            w.classList.remove('open');
+            w.querySelector('.custom-select-display').classList.remove('open');
+        });
+    });
+}
+
+function syncCustomSelects() {
+    document.querySelectorAll('select.input-field').forEach(select => {
+        const wrapper = select.nextElementSibling;
+        if(wrapper && wrapper.classList.contains('custom-select-wrapper')) {
+            const display = wrapper.querySelector('.custom-select-display span');
+            const options = wrapper.querySelectorAll('.custom-option');
+            const selectedOption = select.options[select.selectedIndex];
+            if(selectedOption) {
+                display.textContent = selectedOption.text;
+                options.forEach((opt, index) => {
+                    if(index === select.selectedIndex) opt.classList.add('selected');
+                    else opt.classList.remove('selected');
+                });
+            }
+        }
+    });
+}
+
 // Initialization and auto-refresh
 async function init() {
+    setupCustomSelects();
     await updateBotStatus();
     await updatePortfolio();
     await updateLogs();
     await updateWatchedAssets();
     await loadSettings();
     await loadWatchlist();
+    await loadMCPServers();
     updateTrending(); // fire async, don't await — it takes a few seconds due to yfinance calls
     
     // Poll dashboard data every 5 seconds

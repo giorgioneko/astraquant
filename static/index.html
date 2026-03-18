@@ -146,9 +146,53 @@
                             <label>API Key <small>(Leave blank for local servers like Ollama)</small></label>
                             <input type="password" id="llm-api-key" class="input-field" placeholder="sk-...">
                         </div>
-                        
-                        <button id="save-settings-btn" class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Save Config</button>
                     </div>
+
+                    <div class="settings-group">
+                        <h3>Broker Integration (Paper Trading)</h3>
+                        <label>Broker Platform</label>
+                        <select id="broker-type" class="input-field">
+                            <option value="mock">Local Mock Broker</option>
+                            <option value="external">External API (Alpaca/Binance etc.)</option>
+                        </select>
+                        
+                        <div id="broker-api-settings" style="display:none; margin-top: 1rem;">
+                            <label>API Base URL <small>(e.g. https://paper-api.alpaca.markets)</small></label>
+                            <input type="text" id="broker-base-url" class="input-field">
+                            
+                            <label>API Key</label>
+                            <input type="text" id="broker-api-key" class="input-field">
+                            
+                            <label>Secret Key</label>
+                            <input type="password" id="broker-secret-key" class="input-field">
+                        </div>
+                    </div>
+
+                    <div class="settings-group" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--glass-border);">
+                        <h3>MCP Server Integrations (Agent Tools)</h3>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">Add local Model Context Protocol (MCP) servers to give the AI engine access to interactive tools (e.g. trading APIs, file tools).</p>
+                        
+                        <div id="mcp-server-list" style="margin-bottom: 1rem;">
+                            <!-- Dynamically populated -->
+                        </div>
+                        
+                        <div style="background: rgba(0, 0, 0, 0.2); padding: 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                            <label>Server Name</label>
+                            <input type="text" id="mcp-name" class="input-field" placeholder="e.g. alpaca">
+                            
+                            <label>Execution Command</label>
+                            <input type="text" id="mcp-cmd" class="input-field" placeholder="e.g. npx or python">
+                            
+                            <label>Arguments (space separated)</label>
+                            <input type="text" id="mcp-args" class="input-field" placeholder="e.g. -y @alpacahq/macp-server">
+                            
+                            <label>Environment Variables (JSON Object or blank)</label>
+                            <input type="text" id="mcp-env" class="input-field" placeholder='{"ALPACA_API_KEY": "xxx"}'>
+                            
+                            <button id="add-mcp-btn" class="btn btn-secondary" style="margin-top: 0.5rem; width: 100%;">Add Connection</button>
+                        </div>
+                    </div>
+
                 </div>
             </section>
         </main>

@@ -137,6 +137,10 @@ class SettingsUpdate(BaseModel):
     llm_base_url: str
     llm_model: str
     llm_api_key: str
+    broker_type: str
+    broker_api_key: str
+    broker_secret_key: str
+    broker_base_url: str
 
 @app.post("/api/settings")
 def update_settings(updates: SettingsUpdate):
@@ -145,6 +149,10 @@ def update_settings(updates: SettingsUpdate):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("llm_base_url", updates.llm_base_url))
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("llm_model", updates.llm_model))
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("llm_api_key", updates.llm_api_key))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("broker_type", updates.broker_type))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("broker_api_key", updates.broker_api_key))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("broker_secret_key", updates.broker_secret_key))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("broker_base_url", updates.broker_base_url))
     conn.commit()
     conn.close()
     return {"status": "success"}
@@ -177,6 +185,41 @@ def add_to_watchlist(item: WatchlistUpdate):
 def remove_from_watchlist(ticker: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.strip().upper(),))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+class MCPServer(BaseModel):
+    name: str
+    command: str
+    args: str = ""
+    env_vars: str = ""
+
+@app.get("/api/mcp-servers")
+def get_mcp_servers():
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM mcp_servers")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+@app.post("/api/mcp-servers")
+def add_mcp_server(item: MCPServer):
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT INTO mcp_servers (name, command, args, env_vars) VALUES (?, ?, ?, ?)",
+        (item.name.strip(), item.command.strip(), item.args.strip(), item.env_vars.strip())
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+@app.delete("/api/mcp-servers/{server_id}")
+def delete_mcp_server(server_id: int):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM mcp_servers WHERE id=?", (server_id,))
     conn.commit()
     conn.close()
     return {"status": "success"}

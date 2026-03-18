@@ -59,11 +59,29 @@ class DatabaseManager:
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('llm_model', 'gpt-4o')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('llm_api_key', '')")
 
+        # Table for Broker/Paper Trading settings
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('broker_type', 'mock')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('broker_api_key', '')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('broker_secret_key', '')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('broker_base_url', 'https://paper-api.alpaca.markets')")
+
+
         # Table for Dynamic Watchlist
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
             ticker TEXT PRIMARY KEY,
             active INTEGER DEFAULT 1
+        )
+        ''')
+        
+        # Table for MCP Servers
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS mcp_servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            command TEXT NOT NULL,
+            args TEXT,
+            env_vars TEXT
         )
         ''')
         
@@ -105,6 +123,30 @@ class DatabaseManager:
     def remove_from_watchlist(self, ticker: str):
         conn = sqlite3.connect(self.db_path)
         conn.execute("DELETE FROM watchlist WHERE ticker=?", (ticker,))
+        conn.commit()
+        conn.close()
+
+    def get_mcp_servers(self) -> list:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM mcp_servers")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def add_mcp_server(self, name: str, command: str, args: str, env_vars: str):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO mcp_servers (name, command, args, env_vars) VALUES (?, ?, ?, ?)",
+            (name, command, args, env_vars)
+        )
+        conn.commit()
+        conn.close()
+
+    def delete_mcp_server(self, server_id: int):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("DELETE FROM mcp_servers WHERE id=?", (server_id,))
         conn.commit()
         conn.close()
 

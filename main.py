@@ -1,16 +1,113 @@
 import time
 import sys
 import os
+import json
+import asyncio
+import httpx
+from typing import List, Dict, Any
+from contextlib import AsyncExitStack
+
+# Internal imports
 from data.market_data import MarketDataFetcher
 from data.news_scraper import NewsFetcher
 from data.database import DatabaseManager
-from models.sentiment import SentimentAnalyzer
-from models.price_predictor import PricePredictor
 from trading.broker_client import BrokerClient
 from trading.risk_manager import RiskManager
 
-def main():
-    # Ensure terminal can print UTF-8 (sparklines/symbols) on Windows
+# MCP
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+# We want to connect to all MCP servers defined in DB.
+async def setup_mcp_sessions(db, exit_stack):
+    mcp_servers = db.get_mcp_servers()
+    sessions = {}
+    for server in mcp_servers:
+        env_dict = None
+        if server['env_vars']:
+            try:
+                env_dict = json.loads(server['env_vars'])
+            except:
+                pass
+        
+        server_params = StdioServerParameters(
+            command=server['command'],
+            args=server['args'].split() if server['args'] else [],
+            env={**os.environ, **env_dict} if env_dict else None
+        )
+        try:
+            stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
+            stdio, write = stdio_transport
+            session = await exit_stack.enter_async_context(ClientSession(stdio, write))
+            await session.initialize()
+            sessions[server['name']] = session
+        except Exception as e:
+            print(f"[MCP] Failed to connect to server {server['name']}: {e}")
+            
+    return sessions
+
+async def get_mcp_tools(sessions) -> List[Dict]:
+    tools = []
+    for name, session in sessions.items():
+        try:
+            res = await session.list_tools()
+            for t in res.tools:
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": f"{name}___{t.name}", # e.g. alpaca___execute_trade
+                        "description": t.description,
+                        "parameters": t.inputSchema
+                    }
+                })
+        except Exception as e:
+            print(f"[MCP] Failed to fetch tools from {name}: {e}")
+    return tools
+
+async def chat_with_llm(messages, tools, base_url, api_key, model_name):
+    # Standard OpenAI compatible chat completion
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": model_name,
+        "messages": messages,
+    }
+    if tools:
+        payload["tools"] = tools
+        
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            res = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            res.raise_for_status()
+            return res.json()
+        except Exception as e:
+            print(f"[LLM Error] {e}")
+            if hasattr(e, 'response') and e.response:
+                print(e.response.text)
+            return None
+
+async def execute_mcp_tool(sessions, tool_name: str, args: dict):
+    # Parse name, e.g. alpaca___execute_trade
+    parts = tool_name.split("___", 1)
+    if len(parts) != 2:
+        return f"Error: Malformed tool name {tool_name}"
+    
+    server_name, actual_tool_name = parts
+    session = sessions.get(server_name)
+    if not session:
+        return f"Error: MCP Server {server_name} not found."
+    
+    try:
+        res = await session.call_tool(actual_tool_name, arguments=args)
+        # res is a CallToolResult having 'content' list
+        out = ""
+        for content in res.content:
+            if content.type == "text":
+                out += content.text
+        return out
+    except Exception as e:
+        return f"Error executing tool {tool_name}: {str(e)}"
+
+async def async_main():
     if sys.platform == "win32":
         try:
             import codecs
@@ -18,150 +115,113 @@ def main():
         except Exception:
             pass
 
-    print("Starting AI Trading Bot...")
+    print("Starting AI Agent Trading Bot with MCP Integration...")
     
-    # Initialize components
     db = DatabaseManager()
     market_fetcher = MarketDataFetcher()
     news_fetcher = NewsFetcher()
-    
-    sentiment_model = SentimentAnalyzer()
-    predictor = PricePredictor()
-    
     broker = BrokerClient()
     risk_manager = RiskManager()
     
-    # Pre-train the model
-    print("Pre-training ML model on historical data...")
-    # Get initial watchlist to train on
-    initial_tickers = db.get_watchlist()
-    if not initial_tickers:
-        initial_tickers = ["AAPL"]
-        
-    for ticker in initial_tickers:
-        hist_data = market_fetcher.fetch_historical_stock_data(ticker, period="1y", interval="1d")
-        if not hist_data.empty:
-            db.save_daily_prices(ticker, hist_data)
-            predictor.train(hist_data)
-    
     while True:
         try:
-            # 1. Fetch dynamic settings
             tickers_to_watch = db.get_watchlist()
-            
             provider = db.get_setting('llm_provider')
-            base_url = db.get_setting('llm_base_url')
-            model_name = db.get_setting('llm_model')
-            api_key = db.get_setting('llm_api_key')
+            base_url = db.get_setting('llm_base_url') or "https://api.openai.com/v1"
+            model_name = db.get_setting('llm_model') or "gpt-4o"
+            api_key = db.get_setting('llm_api_key') or ""
             
-            sentiment_model = SentimentAnalyzer(
-                provider=provider,
-                base_url=base_url if base_url else None,
-                api_key=api_key if api_key else None,
-                model=model_name if model_name else "gpt-4o"
-            )
+            print(f"\n--- New Trading Cycle - Balance: ${broker.get_account_balance():.2f} ---")
             
-            # --- SHOW TRENDING MARKETS IN TERMINAL ---
-            print("\n" + "="*50)
-            print("TRENDING MARKETS SUMMARY")
-            print("-" * 50)
-            try:
-                trending_data = market_fetcher.fetch_trending_markets()
-                for t in trending_data[:6]: # Show top 6
-                    color = "\033[92m" if (t['change_pct'] or 0) >= 0 else "\033[91m"
-                    reset = "\033[0m"
-                    change_str = f"{t['change_pct']:+.2f}%" if t['change_pct'] is not None else "N/A"
-                    print(f"{t['ticker']:<8} | ${t['price']:>10.2f} | {color}{change_str:>8}{reset} | {t['sparkline']}")
-            except Exception as e:
-                print(f"Failed to fetch trending: {e}")
-            print("="*50)
-
-            print(f"\n--- New Cycle - Balance: ${broker.get_account_balance():.2f} ---")
-            
-            if not tickers_to_watch:
-                print("Watchlist empty. Add tickers via the Dashboard Settings tab.")
-                time.sleep(10)
+            if provider != "openai":
+                print("Agentic MCP loop requires an LLM provider set to 'Universal OpenAI Compatible API' to parse tool calls.")
+                print("Please update Settings in the dashboard.")
+                await asyncio.sleep(10)
                 continue
                 
-            for ticker in tickers_to_watch:
-                print(f"--- Processing {ticker} ---")
+            if not tickers_to_watch:
+                print("Watchlist empty. Add tickers via the Dashboard Settings tab.")
+                await asyncio.sleep(10)
+                continue
                 
-                # 1. Fetch Market Data for prediction
-                df = market_fetcher.fetch_historical_stock_data(ticker, period="3mo", interval="1d")
-                if df.empty:
-                    continue
-                db.save_daily_prices(ticker, df)
+            async with AsyncExitStack() as exit_stack:
+                print("[MCP] Initializing MCP connections...")
+                sessions = await setup_mcp_sessions(db, exit_stack)
+                system_tools = await get_mcp_tools(sessions)
                 
-                current_price = df['Close'].iloc[-1]
+                print(f"[MCP] Loaded {len(system_tools)} external tools.")
                 
-                # Check for exit conditions first
-                position = broker.get_position(ticker)
-                if position["quantity"] > 0:
-                    exit_action = risk_manager.check_exit_conditions(position["avg_price"], current_price)
-                    if exit_action != "HOLD":
-                        broker.execute_trade("SELL", ticker, position["quantity"], current_price)
-                        db.log_trade(ticker, exit_action, current_price, position["quantity"], 0.0, 0.0)
-                        continue # Move to next ticker if we sold
-
-                # 2. Fetch News and Analyze Sentiment
-                news_items = news_fetcher.fetch_recent_news(ticker, days_back=1)
-                sentiment_score_avg = 0.5 # Neutral baseline
-                
-                if news_items:
-                    total_score = 0
-                    for item in news_items:
-                        sentiment = sentiment_model.analyze_headline(item['title'])
-                        
-                        label = sentiment['label'].lower()
-                        score = sentiment['score']
-                        if 'positive' in label:
-                            total_score += score
-                        elif 'negative' in label:
-                            total_score -= score
+                for ticker in tickers_to_watch:
+                    print(f"\n--- Agent analyzing {ticker} ---")
                     
-                    # Approximate average sentiment (-1 to 1, shifted to 0 to 1 for simplicity)
-                    valid_items = len(news_items)
-                    avg = total_score / valid_items if valid_items > 0 else 0
-                    sentiment_score_avg = (avg + 1) / 2
-                    print(f"[{ticker}] Avg News Sentiment: {sentiment_score_avg:.2f}")
+                    df = market_fetcher.fetch_historical_stock_data(ticker, period="1mo", interval="1d")
+                    if df.empty:
+                        continue
+                        
+                    current_price = df['Close'].iloc[-1]
+                    news_items = news_fetcher.fetch_recent_news(ticker, days_back=1)
+                    news_text = "\n".join([f"- {n['title']}" for n in news_items]) if news_items else "No recent news."
+                    
+                    system_prompt = f"""You are AstraQuant AI, an autonomous financial agent.
+Your objective is to analyze {ticker}. The current price is ${current_price:.2f}.
+Recent News:
+{news_text}
 
-                # 3. Make Prediction
-                prediction = predictor.predict(df)
-                action = prediction["action"]
-                confidence = prediction["confidence"]
-                
-                print(f"[{ticker}] Prediction: {action} (Confidence: {confidence:.2f})")
-                
-                # Combine ML confidence and Sentiment to adjust overall conviction
-                overall_conviction = (confidence + sentiment_score_avg) / 2
-                
-                # 4. Execute Trade based on Risk Manager
-                if action == "BUY" and overall_conviction > 0.6:
-                    qty = risk_manager.calculate_position_size(
-                        broker.get_account_balance(), 
-                        current_price, 
-                        overall_conviction
-                    )
-                    if qty > 0:
-                        success = broker.execute_trade("BUY", ticker, qty, current_price)
-                        if success:
-                            db.log_trade(ticker, "BUY", current_price, qty, sentiment_score_avg, confidence)
-                elif action == "SELL":
-                    if position["quantity"] > 0:
-                        qty_to_sell = position["quantity"]
-                        success = broker.execute_trade("SELL", ticker, qty_to_sell, current_price)
-                        if success:
-                            db.log_trade(ticker, "SELL", current_price, qty_to_sell, sentiment_score_avg, confidence)
-
+Use your provided tools to query further context (like using an external Alpaca MCP server to check positions, fetch fundamental data, or execute trades).
+If you have no tools to execute trades, you can print a recommendation.
+Think step-by-step.
+"""
+                    messages = [{"role": "system", "content": system_prompt}]
+                    
+                    # Agent Loop (max 5 steps)
+                    for step in range(5):
+                        print(f"[{ticker}] Agent thinking (Step {step+1})...")
+                        response_json = await chat_with_llm(messages, system_tools, base_url, api_key, model_name)
+                        
+                        if not response_json or "choices" not in response_json:
+                            print(f"[{ticker}] Agent failed to respond or API error occurred.")
+                            break
+                            
+                        message = response_json["choices"][0]["message"]
+                        messages.append(message)
+                        
+                        if "tool_calls" not in message or not message["tool_calls"]:
+                            print(f"[{ticker}] Agent finalized its output:\n{message.get('content')}")
+                            break # Agent finished
+                            
+                        # Execute Tool Calls
+                        for tool_call in message["tool_calls"]:
+                            tool_name = tool_call["function"]["name"]
+                            tool_args = json.loads(tool_call["function"]["arguments"])
+                            
+                            print(f"[{ticker}] Executing Tool: {tool_name}({tool_args})")
+                            tool_result = await execute_mcp_tool(sessions, tool_name, tool_args)
+                            print(f"[Tool Result]: {str(tool_result)[:200]}...")
+                            
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": str(tool_result),
+                                "name": tool_name
+                            })
+                            
             print("Cycle complete. Waiting for next interval...")
-            time.sleep(3600) # Sleep for an hour
+            await asyncio.sleep(3600)
             
         except KeyboardInterrupt:
             print("Bot stopped by user.")
             break
         except Exception as e:
             print(f"Error in main loop: {e}")
-            time.sleep(60)
+            import traceback
+            traceback.print_exc()
+            await asyncio.sleep(60)
+
+def main():
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        print("Bot stopped.")
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,5 @@
 :root {
+    color-scheme: dark;
     --bg-color: #0d1117;
     --card-bg: rgba(22, 27, 34, 0.6);
     --glass-border: rgba(255, 255, 255, 0.08);
@@ -439,6 +440,7 @@ header {
     letter-spacing: -1px;
     background: linear-gradient(180deg, #fff 0%, #a3b3c3 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
@@ -601,3 +603,77 @@ header {
         grid-column: span 12;
     }
 }
+
+/* Custom Select Menu */
+.custom-select-wrapper {
+    position: relative;
+    user-select: none;
+    width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+.custom-select-display {
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--text-main);
+    font-size: 0.875rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: border-color 0.2s;
+}
+
+.custom-select-display:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.custom-select-display.open {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.custom-select-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #161b22;
+    border: 1px solid var(--glass-border);
+    border-top: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    z-index: 10;
+    display: none;
+    max-height: 250px;
+    overflow-y: auto;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+}
+
+.custom-select-wrapper.open .custom-select-options {
+    display: block;
+}
+
+.custom-option {
+    padding: 0.75rem;
+    color: var(--text-main);
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.custom-option:hover {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--text-main);
+}
+
+.custom-option.selected {
+    background: rgba(88, 166, 255, 0.1);
+    border-left: 3px solid var(--primary);
+    padding-left: calc(0.75rem - 3px);
+}
+

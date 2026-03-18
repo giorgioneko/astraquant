@@ -1,14 +1,25 @@
 import os
+import requests
 from dotenv import load_dotenv
+from data.database import DatabaseManager
 
 load_dotenv()
 
 class BrokerClient:
     def __init__(self):
-        # Placeholder for actual Alpaca/Binance API initialization
-        self.api_key = os.getenv("BROKER_API_KEY")
-        self.secret_key = os.getenv("BROKER_SECRET_KEY")
+        self.db = DatabaseManager()
+        self.broker_type = self.db.get_setting("broker_type") or "mock"
+        
+        self.api_key = self.db.get_setting("broker_api_key") or os.getenv("BROKER_API_KEY")
+        self.secret_key = self.db.get_setting("broker_secret_key") or os.getenv("BROKER_SECRET_KEY")
+        self.base_url = self.db.get_setting("broker_base_url") or "https://paper-api.alpaca.markets"
         self.is_paper = True
+        
+        # Headers for actual Alpaca API initialization
+        self.headers = {
+            "APCA-API-KEY-ID": self.api_key,
+            "APCA-API-SECRET-KEY": self.secret_key
+        } if self.api_key and self.secret_key else {}
         
         # Mock portfolio state
         self.cash_balance = 100000.0
@@ -16,11 +27,30 @@ class BrokerClient:
 
     def get_account_balance(self) -> float:
         """Returns current cash balance."""
-        print("[Broker] Fetching account balance...")
+        if self.broker_type == "external" and self.api_key and self.secret_key and "alpaca" in self.base_url:
+            try:
+                res = requests.get(f"{self.base_url}/v2/account", headers=self.headers)
+                if res.status_code == 200:
+                    return float(res.json().get("cash", 0.0))
+            except Exception as e:
+                print(f"[Broker] Alpaca connection error: {e}")
+
+        print("[Broker] Fetching mock account balance...")
         return self.cash_balance
 
     def get_position(self, ticker: str) -> dict:
         """Returns details about current position in a ticker."""
+        if self.broker_type == "external" and self.api_key and self.secret_key and "alpaca" in self.base_url:
+            try:
+                res = requests.get(f"{self.base_url}/v2/positions/{ticker}", headers=self.headers)
+                if res.status_code == 200:
+                    data = res.json()
+                    return {"quantity": float(data.get("qty", 0)), "avg_price": float(data.get("avg_entry_price", 0))}
+                else:
+                    return {"quantity": 0, "avg_price": 0.0}
+            except Exception as e:
+                print(f"[Broker] Alpaca position error: {e}")
+
         return self.positions.get(ticker, {"quantity": 0, "avg_price": 0.0})
 
     def execute_trade(self, action: str, ticker: str, quantity: float, price: float) -> bool:
@@ -28,6 +58,32 @@ class BrokerClient:
         Executes a paper trade.
         action: 'BUY' or 'SELL'
         """
+        print(f"[Broker] Preparing to {action} {quantity} {ticker}...")
+        
+        if self.broker_type == "external" and self.api_key and self.secret_key:
+            # Currently only Alpaca-like REST logic is fully matched:
+            if "alpaca" in self.base_url:
+                try:
+                    side = "buy" if action == "BUY" else "sell"
+                    payload = {
+                        "symbol": ticker,
+                        "qty": str(quantity),
+                        "side": side,
+                        "type": "market",
+                        "time_in_force": "day"
+                    }
+                    res = requests.post(f"{self.base_url}/v2/orders", headers=self.headers, json=payload)
+                    if res.status_code in [200, 201]:
+                        print(f"[Broker] EXTERNAL {action} SUCCESS: {quantity} {ticker}.")
+                        return True
+                    else:
+                        print(f"[Broker] EXTERNAL {action} FAILED: {res.text}")
+                        return False
+                except Exception as e:
+                    print(f"[Broker] External trade error: {e}")
+                    return False
+
+        # Fallback to Mock trade execution
         if action == "BUY":
             cost = quantity * price
             if self.cash_balance >= cost:
